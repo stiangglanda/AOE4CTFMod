@@ -1,0 +1,28 @@
+<DataWarehouse>
+	<!--ctf/-->
+	<DataObject Name="ctf" Type="Mod" Id="12079033935145560096" Version="1">
+		<DataProperty Name="m_description" Type="Object">
+			<DataValue Name="util::ReflectLocString">4912325062958771445</DataValue>
+			<!--ctf/util::ReflectLocString/-->
+			<DataObject Name="" Type="util::ReflectLocString" Id="4912325062958771445" OwnerId="12079033935145560096">
+				<DataProperty Name="m_modPart2" Type="UInt32" Value="3153586841"/>
+				<DataProperty Name="m_modPart3" Type="UInt32" Value="3534797137"/>
+				<DataProperty Name="m_modPart0" Type="UInt32" Value="1877365682"/>
+				<DataProperty Name="m_modPart1" Type="UInt32" Value="1313001785"/>
+				<DataProperty Name="m_locStringKey" Type="Int32" Value="2"/>
+			</DataObject>
+		</DataProperty>
+		<DataProperty Name="m_name" Type="Object">
+			<DataValue Name="util::ReflectLocString">4442960804716217456</DataValue>
+			<!--ctf/util::ReflectLocString/-->
+			<DataObject Name="" Type="util::ReflectLocString" Id="4442960804716217456" OwnerId="12079033935145560096">
+				<DataProperty Name="m_modPart2" Type="UInt32" Value="3153586841"/>
+				<DataProperty Name="m_modPart3" Type="UInt32" Value="3534797137"/>
+				<DataProperty Name="m_modPart0" Type="UInt32" Value="1877365682"/>
+				<DataProperty Name="m_modPart1" Type="UInt32" Value="1313001785"/>
+				<DataProperty Name="m_locStringKey" Type="Int32" Value="1"/>
+			</DataObject>
+		</DataProperty>
+	</DataObject>
+</DataWarehouse>
+

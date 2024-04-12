@@ -1,0 +1,555 @@
+
+
+-----------------------------------------------------------------------
+-- Imported Scripts
+ 
+-- When you import a .scar file it will be initialized alongside your Game Mode .scar script. 
+-- You can also call functions from imported scripts directly. For example, cardinal.scar has a function called Player_SetCurrentAge() that allows you to set the age of a given player. To use this function, you first have to import cardinal.scar as is demonstrated below.
+-- To examine the below scripts, right-click on the import() function and select "Open Document"
+-----------------------------------------------------------------------
+
+-- Import Utility Scripts
+import("cardinal.scar")							-- Contains sfx references, UI templates, and Civ/Age helper functions
+import("ScarUtil.scar")							-- Contains game helper functions
+
+-- Import Gameplay Systems
+import("gameplay/score.scar")					-- Tracks player score
+import("gameplay/diplomacy.scar")				-- Manages Tribute
+
+-- Import Win Conditions
+import("winconditions/annihilation.scar")		-- Support for eliminating a player when they can no longer fight or produce units
+import("winconditions/elimination.scar")		-- Support for player quitting or dropping (through pause menu or disconnection)
+import("winconditions/surrender.scar")			-- Support for player surrender (through pause menu)
+
+-- Import UI Support
+import("gameplay/chi/current_dynasty_ui.scar")	-- Displays Chinese Dynasty UI
+import("gameplay/event_cues.scar")
+import("gameplay/currentageui.scar")
+
+-----------------------------------------------------------------------
+-- Data
+-----------------------------------------------------------------------
+
+-- Global data table that can be referenced in script functions (e.g. _mod.module = "Mod")
+_mod = {
+	module = "Mod",
+	options = {},
+	objective_title = "$6fe653b2d1394e4299eaf7bb51b9b0d2:29", 
+	objective_requirement = 1,
+	icons = {
+		objective = "icons\\objectives\\objectives_leader",
+	},
+}
+
+-- Register the win condition (Some functions can be prepended with "Mod_" to be called automatically as part of the scripting framework)
+Core_RegisterModule(_mod.module)
+
+-----------------------------------------------------------------------
+-- Scripting framework 
+-----------------------------------------------------------------------
+
+-- Called during load as part of the game setup sequence
+function Mod_OnGameSetup()
+	
+end
+
+-- Called before initialization, preceding other module OnInit functions
+function Mod_PreInit()
+	
+	-- Enable Tribute UI
+	Core_CallDelegateFunctions("TributeEnabled", true)
+	
+end
+
+-- Called on match initialization before handing control to the player
+function Mod_OnInit()
+	
+	-- Store the local player so we can reference them later
+	localPlayer = Core_GetPlayersTableEntry(Game_GetLocalPlayer())
+	
+	-- CALLING FUNCTIONS: The following calls the Mod_FindTownCenter() and Mod_SpawnBuilding() functions directly and immediately.
+	Mod_FindTownCenter()
+	Mod_SpawnBuilding()
+	Mod_SpawnUnits()
+	
+	
+	-- Get the host-selected Options configured in the mod's .rdo file
+	Setup_GetWinConditionOptions(_mod.options)
+	
+	--StandardMode_Start();
+	
+	-- This is a for loop that does something for each player in the match.
+	-- PLAYERS is a table that contains all of the players in the match.
+	-- If there are two players it will run twice, if there are eight players it will run eight times, etc.
+	for i, player in pairs(PLAYERS) do
+		
+		-- Set player starting Ages to Imperial
+		-- Ages are mapped to: Dark Age = 1, Feudal Age = 2, Castle Age = 3, Imperial Age = 4
+		Player_SetCurrentAge(player.id, 4)
+		
+		-- Set player starting resources
+		-- RT stands for Resource Type
+		Player_SetResource(player.id, RT_Food, 1000)		
+		Player_SetResource(player.id, RT_Wood, 50)
+		Player_SetResource(player.id, RT_Gold, 0)
+		Player_SetResource(player.id, RT_Stone, 0)
+		
+		-- Set starting population cap to 50
+		Player_SetMaxPopulation(player.id, CT_Personnel, 50)
+		
+	end
+	
+	-- Activate the losing condition on King Death
+	Rule_AddGlobalEvent(Mod_WinCondition_OnKingDeath, GE_EntityKilled)
+	
+	Core_CallDelegateFunctions("DiplomacyEnabled", false)
+	Core_CallDelegateFunctions("TributeEnabled", true)
+end
+
+-- Called after initialization is done when game is fading up from black
+function Mod_Start()
+	
+	-- Setup the player's objective UI by calling the below function directly
+	Mod_SetupObjective()
+	
+end
+
+-- Called when Core_SetPlayerDefeated() is invoked. Signals that a player has been eliminated from play due to defeat.
+function Mod_OnPlayerDefeated(player, reason)
+	
+end
+
+-- When a victory condition is met, a module must call Core_OnGameOver() in order to invoke this delegate and notify all modules that the match is about to end. Generally used for clean up (removal of rules, objectives, and UI elements specific to the module).
+function Mod_OnGameOver()
+	
+	-- It is good practice to remove any Rules that were configured so they do not continue to run after the match has concluded
+	--Rule_RemoveGlobalEvent(Mod_OnConstructionComplete)
+
+end
+
+-----------------------------------------------------------------------
+-- Mod Functions
+-----------------------------------------------------------------------
+
+-- This function creates the objective UI that appears in the top-left corner of each player's screen
+function Mod_SetupObjective()
+	
+	-- Check if an objective has not been created yet
+	if _mod.objective == nil then 
+		
+		-- Create and store objective in the global table created at the start of this script
+		_mod.objective = Obj_Create(localPlayer.id, _mod.objective_title, Loc_Empty(), _mod.icons.objective, "ConquestObjectiveTemplate", localPlayer.raceName, OT_Primary, 0, "royalrumble")		
+		
+		-- Sets the objective's state to incomplete
+		Obj_SetState(_mod.objective, OS_Incomplete)
+		-- Sets the objective to visible so players can see it
+		Obj_SetVisible(_mod.objective, true)
+		-- Sets the progress element of the objective to visible so players can see it
+		--Obj_SetProgressVisible(_mod.objective, true)		
+		-- Sets the objective progress type to a counter
+		--Obj_SetCounterType(_mod.objective, COUNTER_CountUpTo)
+		-- Set the starting objective progress to 1 because we spawn a House for the player in Mod_SpawnBuilding()
+		--Obj_SetCounterCount(_mod.objective, 1)
+		-- Set the maximum objective progress
+		--Obj_SetCounterMax(_mod.objective, _mod.objective_requirement)
+		-- Set the objective progress bar percentage value
+		--Obj_SetProgress(_mod.objective, 1 / _mod.objective_requirement)
+	end
+end
+
+-- This function finds the starting Town Center for all players in the match, reveals it to all other players, and increases its production speed
+function Mod_FindTownCenter()
+	
+	-- This is a for loop that does something for each player in the match.
+	-- PLAYERS is a table that contains all of the players in the match.
+	-- If there are two players it will run twice, if there are eight players it will run eight times, etc.
+	for i, player in pairs(PLAYERS) do
+		local eg_player_entitiessss = Player_GetSquads(player.id)
+		SGroup_Filter(eg_player_entitiessss, "villager", FILTER_KEEP)
+		SGroup_Destroy(eg_player_entitiessss)
+		-- Get the player's entities and place them into an ENTITY GROUP
+		local eg_player_entities = Player_GetEntities(player.id)
+		
+		-- Filter out everything in the ENTITY GROUP except for the Town Center
+		EGroup_Filter(eg_player_entities, "town_center", FILTER_KEEP)
+		-- Get the Town Center ENTITY by getting the first entry in the ENTITY GROUP we just filtered
+		local entity =  EGroup_GetEntityAt(eg_player_entities, 1)
+		-- Get the Town Center's ENTITY ID
+		-- Some functions require the ENTITY ID to perform an action on the ENTITY
+		local entity_id = Entity_GetID(entity) 
+		-- Get the Town Center's position
+		local position = Entity_GetPosition(entity)
+		-- Store the player's Town Center information so it can be referenced later
+		player.town_center = {
+			entity = entity,
+			entity_id = entity_id,
+			position = position,
+		}
+		
+		Entity_Destroy(entity);	
+		-- Reveal Town Center locations for the first 30 seconds of the match
+		--FOW_RevealArea(player.town_center.position, 40, 30)
+		
+	end
+	
+	for i, player in pairs(PLAYERS) do
+		
+		-- Get the player's entities and place them into an ENTITY GROUP
+		local eg_player_entities = Player_GetSquads(player.id)
+		-- Filter out everything in the ENTITY GROUP except for the Town Center
+		local EGroupName = EGroup_GetName(eg_player_entities)
+		print(EGroupName) 
+		local EGroupCnt = EGroup_Count(eg_player_entities)
+		for i=1,EGroupCnt do 
+			print(i) 
+		end
+			
+		-- Reveal Town Center locations for the first 30 seconds of the match
+		--FOW_RevealArea(player.town_center.position, 40, 30)
+		
+	end
+end
+
+-- This function spawns a group of Spearmen next each player's Town Center
+function Mod_SpawnUnits()
+	
+	-- This is a for loop that does something for each player in the match.
+	-- PLAYERS is a table that contains all of the players in the match.
+	-- If there are two players it will run twice, if there are eight players it will run eight times, etc.
+	for i, player in pairs(PLAYERS) do
+		
+		-- Get player's Civilization name
+		local player_civ = Player_GetRaceName(player.id)
+		
+		-- Create a local variable for the Spearman BLUEPRINT (BP) we are going to find below
+		-- The local variable needs to be established before the below IF statement so it can be referenced outside of it within the function
+		local sbp_spearman
+		
+		-- This checks which Civilization the player is using and gets the appropriate BLUEPRINTS for the Spearmen unit
+		-- BLUEPRINTS are the instructions needed to create a SQUAD, ENTITY, or UPGRADE
+		if player_civ == "english" then
+			
+			-- Get the Age 4 English Spearman Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_eng")
+			
+		elseif player_civ == "chinese" then
+			
+			-- Get the Age 4 Chinese Spearman Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_chi")
+			
+		elseif player_civ == "french" then
+			
+			-- Get the Age 4 French Spearman Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_fre")
+			
+		elseif player_civ == "hre" then
+			
+			-- Get the Age 4 HRE Spearman Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_hre")
+			
+		elseif player_civ == "mongol" then
+			
+			-- Get the Age 4 Mongol Spearman Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_mon")
+			
+		elseif player_civ == "rus" then
+			
+			-- Get the Age 4 Rus Spearman Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_rus")
+			
+		elseif player_civ == "sultanate" then
+			
+			-- Get the Age 4 Delhi Sultanate Spearman Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_sul")
+			
+		elseif player_civ == "abbasid" then
+			
+			-- Get the Age 4 Abbasid Spearman Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_abb")
+			
+		elseif player_civ == "ottoman" then
+			
+			-- Get the Age ottoman king Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_ott")
+			
+		elseif player_civ == "malian" then
+			
+			-- Get the Age 4 malian king Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_mal")	
+		
+		elseif player_civ == "byzantine" then
+			
+			-- Get the Age byzantine king Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_byz")
+			
+		elseif player_civ == "japanese" then
+			
+			-- Get the Age japanese king Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_jpn")
+			
+		elseif player_civ == "abbasid_ha_01" then
+		
+			-- Get the Age abbasid historic king Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_abb_ha_01")
+			
+		elseif player_civ == "chinese_ha_01" then
+		
+			-- Get the Age chinese historic king Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_chi_ha_01")
+			
+		elseif player_civ == "french_ha_01" then
+		
+			-- Get the Age french historic king Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_fre_ha_01")
+			
+		elseif player_civ == "hre_ha_01" then
+		
+			-- Get the Age chinese historic king Blueprint
+			sbp_spearman = BP_GetSquadBlueprint("unit_king_1_hre_ha_01")
+			
+		end
+		
+		-- Get a position offset from the player's Town Center
+		local spawn_position = Util_GetOffsetPosition(player.town_center.position, 20, 10)
+		
+		-- Create a unique sgroup name for this player's spearmen units
+		local sgroup_name = "sg_player_spearmen_" .. tostring(player.id)
+		-- Create a SQUAD GROUP (SGROUP) that will act as a container for the spawned SQUADS
+		-- SGROUPS are useful for controlling all of the spawned units at once via scripted commands.
+		local sg_player_spearmen = SGroup_CreateIfNotFound(sgroup_name)
+		
+		-- This function spawns 16 Spearmen of the player's Civilization near their starting Town Center
+		-- You can hover over the function to view the parameters it requires. From left to right:
+		-- player = The player that the spawned units will belong to.
+		-- sgroup = The SQUAD GROUP (SG) that the units will be spawned into.
+		-- units = A table of data that contains the SQUAD BLUEPRINT (SBP) and the number of SQUADS (aka units) to spawn.
+		-- spawn = The location the units will be spawned at.
+		UnitEntry_DeploySquads(player.id, sg_player_spearmen, {{sbp = sbp_spearman, numSquads = 1 }}, spawn_position)
+		
+		-- Get a position offset from the Town Center position
+		local move_position = Util_GetOffsetPosition(player.town_center.position, 20, 15)
+		-- Command the SGROUP to enter into a formation
+		Cmd_Ability(sg_player_spearmen, BP_GetAbilityBlueprint("core_formation_line"))
+		-- Command the SGROUP to Move to that position
+		Cmd_FormationMove(sg_player_spearmen, move_position, false)
+		
+	end
+end
+
+-- This function spawns a building next to each player's Town Center
+function Mod_SpawnBuilding()
+	
+	-- This is a for loop that does something for each player in the match.
+	-- PLAYERS is a table that contains all of the players in the match.
+	-- If there are two players it will run twice, if there are eight players it will run eight times, etc.
+	for i, player in pairs(PLAYERS) do
+		
+		-- Get player's Civilization name
+		local player_civ = Player_GetRaceName(player.id)
+		
+		-- Create a local variable for the Spearman BLUEPRINT (BP) we are going to find below
+		-- The local variable needs to be established before the below IF statement so it can be referenced outside of it within the function
+		local ebp_building
+		
+		-- This checks which Civilization the player is using and gets the appropriate BLUEPRINTS for the House building
+		-- BLUEPRINTS are the instructions needed to create a SQUAD, ENTITY, or UPGRADE
+		if player_civ == "english" then
+			
+			-- Get the English House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_eng")
+			
+		elseif player_civ == "chinese" then
+			
+			-- Get the Chinese House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_chi")
+			
+		elseif player_civ == "french" then
+			
+			-- Get the French House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_fre")
+			
+		elseif player_civ == "hre" then
+			
+			-- Get the HRE House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_hre")
+			
+		elseif player_civ == "mongol" then
+			
+			-- Get the Mongol Ger Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_mon")
+			
+		elseif player_civ == "rus" then
+			
+			-- Get the Rus House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_wooden_fort_rus")
+			
+		elseif player_civ == "sultanate" then
+			
+			-- Get the Delhi Sultanate House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_control_sul")
+			
+		elseif player_civ == "abbasid" then
+			
+			-- Get the Abbasid House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_control_abb")
+			
+		elseif player_civ == "ottoman" then
+			
+			-- Get the ottoman House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_ott")
+			
+		elseif player_civ == "malian" then
+			
+			-- Get the malian House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_control_mal")
+		
+		elseif player_civ == "byzantine" then
+			
+			-- Get the byzantine House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_byz")
+			
+		elseif player_civ == "japanese" then
+			
+			-- Get the japanese House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_jpn")
+			
+		elseif player_civ == "abbasid_ha_01" then
+		
+			-- Get the abbasid historic army House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_control_abb_ha_01")
+			
+		elseif player_civ == "chinese_ha_01" then
+		
+			-- Get the chinese historic army House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_chi_ha_01")
+			
+		elseif player_civ == "french_ha_01" then
+			
+			-- Get the french historic army House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_fre_ha_01")
+			
+		elseif player_civ == "hre_ha_01" then
+			
+			-- Get the hre historic army House Blueprint
+			ebp_building = BP_GetEntityBlueprint("building_defense_outpost_hre_ha_01")
+			
+		end
+		
+		-- Get a position offset from the player's Town Center
+		local spawn_position = Util_GetOffsetPosition(player.town_center.position, 10, 20)
+		
+		-- Create a new ENTITY using the ENTITY BLUEPRINT (EBP) we found above at the location we calculated above
+		local entity = Entity_Create(ebp_building, player.id, spawn_position, false)
+		-- Spawn the ENTITY
+		Entity_Spawn(entity)
+		-- Construct the ENTITY immediately
+		Entity_ForceConstruct(entity)
+		-- Snap the ENTITY to the construction grid
+		Entity_SnapToGridAndGround(entity, false)	
+		
+	end
+end
+
+--[[
+function Mod_WinCondition_CheckKing()
+	for i = 1, World_GetPlayerCount() do
+		local player = World_GetPlayerAt(i)
+		
+		
+		local num_squads = Player_GetEntityCountByUnitType(player, "king")
+		if num_squads <= 0 then
+			Core_SetPlayerDefeated(player, Annihilation_LoserPresentation, WR_ANNIHILATION)
+		end
+	end
+end
+]]--
+
+function Mod_InitWinCondition()
+	-- Add a rule that will get called periodically to check if the win condition has been met.
+	--Rule_AddGlobalEvent(Mod_WinCondition_OnKingDeath, GE_EntityKilled)
+end
+
+function Mod_WinCondition_OnKingDeath(context)
+	if Entity_IsOfType(context.victim, "King") then
+		Core_SetPlayerDefeated(context.victimOwner, Annihilation_LoserPresentation, WR_ANNIHILATION)
+	end
+	
+end
+
+-- Add our win condition to the initialization list.
+--Scar_AddInit(Mod_InitWinCondition)
+
+-----------------------------------------------------------------------
+-- Standard Functions
+-----------------------------------------------------------------------
+
+function WinCondition_CheckSurrender()
+	local results = {}
+	for i = 1, World_GetPlayerCount() do
+		local player = World_GetPlayerAt(i)
+		local team = Player_GetTeam(player)	
+		
+		results[team] = results[team] or { surrender_count = 0 }
+		
+		-- If any player on a team has surrendered, that team loses.
+		if Player_IsSurrendered(player) then
+			results[team].surrender_count = results[team].surrender_count + 1
+		end
+	end
+	
+	-- Check if any team has surrendered.
+	for team, result in pairs(results) do
+		if result.surrender_count > 0 then
+			Rule_RemoveAll()
+			
+			-- We have a winner!
+			local losingTeam = team
+			local winningTeam = Team_GetEnemyTeam(losingTeam)
+			
+			World_SetTeamWin(winningTeam, -1)
+		end
+	end
+end
+
+
+
+local function InitWinCondition()
+	-- Add a rule that will get called periodically to check if the win condition has been met.
+	Rule_AddInterval(WinCondition_CheckSurrender, 3)
+end
+
+-- Add our win condition to the initialization list.
+Scar_AddInit(InitWinCondition)
+import("ScarUtil.scar")
+import("GameScarUtil.scar")
+
+-- Callback invoked by OnInit() in core.scar
+function StandardMode_OnInit()
+
+	--UI_AllTerritoryHide()
+
+	--Core_CallDelegateFunctions("DiplomacyEnabled", _match.is_diplomacy_enabled)
+	--Core_CallDelegateFunctions("TributeEnabled", _match.is_tribute_enabled)
+	
+end
+
+-- Explored options
+function StandardMode_Start()
+	-- Fog of war options
+	if (_mod.options.section_starting_conditions and _mod.options.section_starting_conditions.option_fow) then
+		if (_mod.options.section_starting_conditions.option_fow.enum_value == _mod.options.section_starting_conditions.option_fow.enum_items.option_fow_explore) then 
+			FOW_ExploreAll()
+		elseif (_mod.options.section_starting_conditions.option_fow.enum_value == _mod.options.section_starting_conditions.option_fow.enum_items.option_fow_reveal) then
+			FOW_ForceRevealAllUnblockedAreas()
+		end
+	end
+
+	-- UI Options
+	if (_mod.options.section_starting_conditions and _mod.options.section_starting_conditions.option_score) then
+		for _, player in pairs(PLAYERS) do
+			player.scarModel.show_actual_score = true
+			UI_SetPlayerDataContext(player.id, player.scarModel)
+		end
+	end
+end
+
