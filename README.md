@@ -19,3 +19,8 @@ and with the following units
 - Knights
 - Scout
 - Monk
+
+## Usage 
+
+to use this mod you need the [Age of Empires 4 Content Editor](https://support.ageofempires.com/hc/en-us/articles/5407791017108-Launching-the-Age-of-Empires-IV-Content-Editor)
+then build the mod using the tool and launch Age of Empires 4 with the Launch Option *-dev*
