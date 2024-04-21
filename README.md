@@ -1,6 +1,6 @@
 # Age of Empires 4 Capture the Flag Mod
 
-<img src="https://github.com/stiangglanda/AOE4CTFMod/blob/main/assets/mod.png" alt="drawing" width="200"/>
+<img src="https://github.com/stiangglanda/AOE4CTFMod/blob/main/assets/mod.png" alt="drawing" width="400"/>
 
 <span style="color:red">works only for the *French* at the moment</span>
 
